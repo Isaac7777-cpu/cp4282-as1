@@ -16,22 +16,12 @@ import argparse
 
 import numpy as np
 from PIL import Image
-import sys
-from pathlib import Path
 
-_here = Path(__file__).resolve().parent
-if str(_here) not in sys.path:
-    sys.path.insert(0, str(_here))
-# `shared/` sits beside this file in the assignment repo, and one level up in the course repo.
-for _candidate in (_here / "shared", _here.parent / "shared"):
-    if _candidate.is_dir():
-        if str(_candidate) not in sys.path:
-            sys.path.insert(0, str(_candidate))
-        break
-from camera import Camera
-from gaussian_set import GaussianSet
-from projected_gaussians import ProjectedGaussians
-from splat_math import ALPHA_CUTOFF, SUPPORT_RADIUS_SQUARED, quaternion_to_matrix
+from shared.camera import Camera
+from shared.gaussian_set import GaussianSet
+from shared.projected_gaussians import ProjectedGaussians
+from shared.splat_math import ALPHA_CUTOFF, SUPPORT_RADIUS_SQUARED, quaternion_to_matrix
+
 # A faint splat reaches ALPHA_CUTOFF sooner than a strong one, so it can be truncated sooner than
 # the full 3-sigma disc. `beta` scales how quickly that happens. Note the Warp trainers use
 # `compact_box.beta = 0.5`; these renderers keep 1.0, which is what v2 and v3 have always applied.
@@ -183,14 +173,20 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=800)
     parser.add_argument("--height", type=int, default=800)
     parser.add_argument("--focal-length", type=float, default=700.0)
-    parser.add_argument("--camera-position", nargs=3, type=float, default=(0.0, 0.0, 0.0))
+    parser.add_argument(
+        "--camera-position", nargs=3, type=float, default=(0.0, 0.0, 0.0)
+    )
     parser.add_argument("--look-at", nargs=3, type=float, default=(0.0, 0.0, 1.0))
     parser.add_argument("--up", nargs=3, type=float, default=(0.0, 1.0, 0.0))
     args = parser.parse_args()
 
     camera = Camera.from_look_at(
-        args.width, args.height, args.focal_length,
-        args.camera_position, args.look_at, args.up,
+        args.width,
+        args.height,
+        args.focal_length,
+        args.camera_position,
+        args.look_at,
+        args.up,
     )
     splats = GaussianSet.from_ply(args.ply)
     image = CpuRenderer(camera).render(splats)
