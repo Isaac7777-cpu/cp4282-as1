@@ -1,0 +1,16 @@
+[project]
+name = "cp4282-as1"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "numpy>=2.5.5",
+    "pillow>=13.0.0",
+    "plyfile>=1.1.5",
+    "pyyaml>=6.0.4",
+    "warp-metal",
+]
+
+[tool.uv.sources]
+warp-metal = { path = "warp_metal-1.17.0.3-py3-none-macosx_11_0_arm64.whl" }
