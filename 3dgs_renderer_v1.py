@@ -156,12 +156,36 @@ class CpuRenderer:
             y = py + 0.5
             for px in range(self.camera.width):
                 x = px + 0.5
-                # TODO: Calculate the RGB value at (x, y)
-                # Composite the sorted splats front to back, then finish with the
-                # background weighted by the remaining transmittance.
+                # Calculate the RGB value at (x, y)
+                # Composite the sorted splats front to back,
+                # then finish with the background weighted by the remaining transmittance.
+                delta_dists: np.ndarray = (
+                    np.expand_dims(np.array([x, y]), axis=0) - projected.centres
+                )
 
-                # TODO: The RHS is a placeholder
-                image[py, px] = np.zeros(3, dtype=np.float32)
+                c = np.zeros([3], dtype=np.float32)
+                T = 1.0
+
+                for i in range(delta_dists.shape[0]):
+                    du, dv = delta_dists[i, :]
+                    A, B, C = projected.conics[i, :]
+                    q = A * du**2 + 2 * B * du * dv + C * dv**2
+
+                    if q > supports[i]:
+                        continue
+
+                    alpha = min(projected.opacities[i] * np.exp(-0.5 * q), 0.99)
+
+                    if alpha <= (1 / 255):
+                        continue
+
+                    c = c + T * alpha * projected.colors[i, :]
+                    T = T * (1 - alpha)
+
+                    if T < 1e-4:
+                        break
+
+                image[py, px] = c + T * background_color
 
         return image
 
@@ -189,7 +213,7 @@ def main() -> None:
         args.up,
     )
     splats = GaussianSet.from_ply(args.ply)
-    image = CpuRenderer(camera).render(splats)
+    image = CpuRenderer(camera).render(splats, background=(0.0, 0.0, 0.0))
     Image.fromarray(np.uint8(np.clip(image, 0.0, 1.0) * 255.0)).save(args.output)
 
 
