@@ -38,7 +38,7 @@ def rasterize(
     background: wp.vec3,
     image: wp.array[wp.vec3],
 ):
-    pixel = wp.tid()
+    pixel = int(wp.tid())
     px = float(pixel % width) + 0.5
     py = float(pixel // width) + 0.5
     # TODO: Calculate the RGB at pixel (px, py)
@@ -74,7 +74,6 @@ def rasterize(
         if T < 1e-4:
             break
 
-    # TODO: The RHS is a placeholder
     image[pixel] = c + T * background
 
 
