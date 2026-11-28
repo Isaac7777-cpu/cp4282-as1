@@ -14,9 +14,10 @@ import argparse
 import importlib
 import sys
 from pathlib import Path
+
 import numpy as np
-from PIL import Image
 import warp as wp
+from PIL import Image
 
 _reference = importlib.import_module("3dgs_renderer_v1")
 _here = Path(__file__).resolve().parent
@@ -28,7 +29,7 @@ for _candidate in (_here / "shared", _here.parent / "shared"):
         if str(_candidate) not in sys.path:
             sys.path.insert(0, str(_candidate))
         break
-from tile_builder import GaussianFirstTileBuilder
+from shared.tile_builder import GaussianFirstTileBuilder
 
 Camera = _reference.Camera
 GaussianSet = _reference.GaussianSet
@@ -107,7 +108,9 @@ class GaussianFirstWarpRenderer:
         self.depths = wp.zeros(maximum_splats, dtype=wp.float32, device=self.device)
         self.group_ids = wp.zeros(maximum_splats, dtype=wp.int32, device=self.device)
         self.splat_ids = wp.array(
-            np.arange(maximum_splats, dtype=np.uint32), dtype=wp.uint32, device=self.device
+            np.arange(maximum_splats, dtype=np.uint32),
+            dtype=wp.uint32,
+            device=self.device,
         )
         self.image = wp.zeros(width * height, dtype=wp.vec3, device=self.device)
         self.builder = GaussianFirstTileBuilder(
@@ -120,8 +123,12 @@ class GaussianFirstWarpRenderer:
             self.device,
         )
 
-    def render(self, splats: GaussianSet, camera: Camera,
-               background: tuple[float, float, float] = (1.0, 1.0, 1.0)) -> np.ndarray:
+    def render(
+        self,
+        splats: GaussianSet,
+        camera: Camera,
+        background: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    ) -> np.ndarray:
         projected = project_gaussians(splats, camera)
         count = len(projected.opacities)
 
@@ -130,13 +137,23 @@ class GaussianFirstWarpRenderer:
                 f"Renderer capacity {self.maximum_splats:,} is below {count:,} visible splats."
             )
 
-        self.centres.assign(wp.array(projected.centres, dtype=wp.vec2, device=self.device))
-        self.conics.assign(wp.array(projected.conics, dtype=wp.vec3, device=self.device))
-        self.colours.assign(wp.array(projected.colors, dtype=wp.vec3, device=self.device))
-        self.opacities.assign(wp.array(projected.opacities, dtype=wp.float32, device=self.device))
+        self.centres.assign(
+            wp.array(projected.centres, dtype=wp.vec2, device=self.device)
+        )
+        self.conics.assign(
+            wp.array(projected.conics, dtype=wp.vec3, device=self.device)
+        )
+        self.colours.assign(
+            wp.array(projected.colors, dtype=wp.vec3, device=self.device)
+        )
+        self.opacities.assign(
+            wp.array(projected.opacities, dtype=wp.float32, device=self.device)
+        )
         supports = compact_support(projected.opacities)
         self.supports.assign(wp.array(supports, dtype=wp.float32, device=self.device))
-        self.depths.assign(wp.array(projected.depths, dtype=wp.float32, device=self.device))
+        self.depths.assign(
+            wp.array(projected.depths, dtype=wp.float32, device=self.device)
+        )
 
         offsets, packed_pairs, _ = self.builder.build(
             self.centres,
@@ -181,8 +198,12 @@ def main() -> None:
     parser.add_argument("--focal-length", type=float, default=350.0)
     parser.add_argument("--tile-size", type=int, default=16)
     parser.add_argument("--tile-pair-capacity", type=int, default=None)
-    parser.add_argument("--device", default="cpu", help="Warp device, such as cpu or cuda:0")
-    parser.add_argument("--camera-position", nargs=3, type=float, default=(0.0, 0.0, 0.0))
+    parser.add_argument(
+        "--device", default="cpu", help="Warp device, such as cpu or cuda:0"
+    )
+    parser.add_argument(
+        "--camera-position", nargs=3, type=float, default=(0.0, 0.0, 0.0)
+    )
     parser.add_argument("--look-at", nargs=3, type=float, default=(0.0, 0.0, 1.0))
     parser.add_argument("--up", nargs=3, type=float, default=(0.0, 1.0, 0.0))
     args = parser.parse_args()

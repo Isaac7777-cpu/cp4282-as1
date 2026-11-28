@@ -1,3 +1,9 @@
+---
+id: 3dgs_renderer_v3_annotated
+aliases: []
+tags: []
+---
+
 # Annotated Walkthrough: `3dgs_renderer_v3.py` and `shared/tile_builder.py`
 
 Third and last. Read [v1](3dgs_renderer_v1_annotated.md) and
@@ -29,7 +35,7 @@ There are two ways to build those lists:
 
 - **Tile-first** — for each tile, search all splats. Still quadratic; no better than v2.
 - **Gaussian-first** — for each splat, work out which tiles it touches and emit one record per
-  tile. Cost is proportional to *actual overlaps*, not to tiles × splats.
+  tile. Cost is proportional to _actual overlaps_, not to tiles × splats.
 
 v3 takes the Gaussian-first route, which is what its class name says. The catch is that each splat
 emits a **variable** number of records, and thousands of threads must write into one shared output
@@ -40,7 +46,7 @@ array without colliding. Resolving that is most of `tile_builder.py`.
 ## 1. Tile geometry
 
 ```python
-        self.tile_size = tile_size                                   # 16
+        self.tile_size = tile_size  # 16
         self.tiles_x = (width + tile_size - 1) // tile_size
         self.tiles_y = (height + tile_size - 1) // tile_size
         self.tile_count = self.tiles_x * self.tiles_y
@@ -52,7 +58,8 @@ width still gets 25 tiles rather than 24 and a bit. Tiles are numbered row-major
 
 ```python
         self.tile_pair_capacity = (
-            int(tile_pair_capacity) if tile_pair_capacity is not None
+            int(tile_pair_capacity)
+            if tile_pair_capacity is not None
             else max(1, maximum_splats * 32)
         )
 ```
@@ -73,8 +80,19 @@ is the variable-length output problem from §0.
 
 ```python
 @wp.kernel(enable_backward=False)
-def count_projected_tile_pairs(centres, conics, supports, count, width, height,
-                               tile_size, tiles_x, tiles_y, tile_bounds, pair_counts):
+def count_projected_tile_pairs(
+    centres,
+    conics,
+    supports,
+    count,
+    width,
+    height,
+    tile_size,
+    tiles_x,
+    tiles_y,
+    tile_bounds,
+    pair_counts,
+):
     splat = wp.tid()
     pair_counts[splat] = 0
     tile_bounds[splat] = wp.vec4i(0, -1, 0, -1)
@@ -131,13 +149,14 @@ still rejects them.
 ### 2.2 Turn counts into positions
 
 ```python
-        wp.utils.array_scan(self.pair_counts[:item_count], self.pair_prefix[:item_count],
-                            inclusive=True)
+        wp.utils.array_scan(
+            self.pair_counts[:item_count], self.pair_prefix[:item_count], inclusive=True
+        )
 ```
 
 This is the step that solves the variable-length write problem, and it is worth dwelling on.
 
-Each splat now knows *how many* records it will write, but not *where* to write them. If every
+Each splat now knows _how many_ records it will write, but not _where_ to write them. If every
 thread simply appended, they would overwrite each other.
 
 A **prefix sum** (or scan) fixes this. Given counts `[3, 0, 2, 4]` the inclusive scan is
@@ -170,17 +189,17 @@ point in the frame, and worth remembering if you ever profile this code.
             for tile_x in range(bounds[0], bounds[1] + 1):
                 group = group_base + tile_y * tiles_x + tile_x
                 depth_keys[output] = depths[item]
-                packed_pairs[output] = (
-                    wp.uint64(group) << wp.uint64(32)
-                ) | wp.uint64(splat_ids[item])
+                packed_pairs[output] = (wp.uint64(group) << wp.uint64(32)) | wp.uint64(
+                    splat_ids[item]
+                )
                 output += 1
 ```
 
 Each thread walks its own tile rectangle and writes one record per tile, starting at the offset
 derived in §2.2.
 
-The record is **bit-packed** into a single 64-bit integer: the tile index in the high 32 bits, the
-splat index in the low 32. `<< 32` shifts the group up; `|` merges the two halves.
+The record is **bit-packed** into a single 64-bit integer: the tile index in the high 32 bits, the splat index in the low 32.
+`<< 32` shifts the group up; `|` merges the two halves.
 
 ```
  63                    32 31                     0
@@ -192,9 +211,8 @@ splat index in the low 32. `<< 32` shifts the group up; `|` merges the two halve
 Packing them together means a single sort can order by tile and carry the splat along with it,
 rather than sorting two arrays in lockstep.
 
-`group_ids` and `tiles_per_view` exist because this builder is shared with the course trainers,
-which tile several camera views at once. The renderer passes all-zero group ids and a single view,
-so `group_base` is 0 and `group` is just the tile index.
+`group_ids` and `tiles_per_view` exist because this builder is shared with the course trainers, which tile several camera views at once.
+The renderer passes all-zero group ids and a single view, so `group_base` is 0 and `group` is just the tile index.
 
 ### 2.4 Sort — twice, and the order matters
 
@@ -206,37 +224,42 @@ First sort **by depth**, carrying the packed records along. After this the recor
 near-to-far but scattered across tiles.
 
 ```python
-        wp.launch(unpack_group_keys, ...)     # group_keys[i] = packed_pairs[i] >> 32
-        wp.utils.radix_sort_pairs(self.group_keys, self.packed_pairs, pair_count,
-                                  end_bit=max(1, (group_count - 1).bit_length()))
+        wp.launch(unpack_group_keys, ...)  # group_keys[i] = packed_pairs[i] >> 32
+        wp.utils.radix_sort_pairs(
+            self.group_keys,
+            self.packed_pairs,
+            pair_count,
+            end_bit=max(1, (group_count - 1).bit_length()),
+        )
 ```
 
 Then extract the tile index from the high bits and sort **by tile**.
 
-The trick is that a radix sort is **stable**: records comparing equal keep their relative order. So
-grouping by tile preserves the depth ordering established by the first sort, and each tile's run
-comes out sorted near to far — exactly what the compositing rule needs.
+The trick is that a radix sort is **stable**: records comparing equal keep their relative order.
+So grouping by tile preserves the depth ordering established by the first sort, and each tile's run comes out sorted near to far — exactly what the compositing rule needs.
 
-`end_bit` tells the sort how many bits actually matter. `(group_count - 1).bit_length()` is the
-number of bits needed to represent the largest tile index; for 625 tiles that is 10 bits rather
-than 32, so the sort does a third of the passes.
+`end_bit` tells the sort how many bits actually matter.
+`(group_count - 1).bit_length()` is the number of bits needed to represent the largest tile index; for 625 tiles that is 10 bits rather than 32, so the sort does a third of the passes.
 
 !!! note "A cheaper alternative"
-    A single sort on a key of `(tile << 32) | depth_bits` would achieve the same ordering in one
-    pass. The two-pass version here is easier to read and to reason about, which is why the
-    teaching implementation keeps it.
+A single sort on a key of `(tile << 32) | depth_bits` would achieve the same ordering in one
+pass. The two-pass version here is easier to read and to reason about, which is why the
+teaching implementation keeps it.
 
 ### 2.5 Find where each tile's run starts
 
 ```python
-        wp.launch(count_sorted_groups, ...)   # group_counts[group] += 1
-        wp.utils.array_scan(self.group_counts[:group_count],
-                            self.tile_offsets[1:group_count + 1], inclusive=True)
+        wp.launch(count_sorted_groups, ...)  # group_counts[group] += 1
+        wp.utils.array_scan(
+            self.group_counts[:group_count],
+            self.tile_offsets[1 : group_count + 1],
+            inclusive=True,
+        )
 ```
 
 `count_sorted_groups` uses `wp.atomic_add`, which is how many threads safely increment the same
 counter: the hardware serialises just that one update, so no increments are lost. This is the one
-place in the assignment where threads *do* write to shared locations, and it needs an atomic
+place in the assignment where threads _do_ write to shared locations, and it needs an atomic
 precisely because the "one thread, one output slot" discipline from v2 §2 does not apply.
 
 A second prefix sum then turns per-tile counts into **start offsets**, written from index 1 so that
@@ -251,9 +274,9 @@ Two arrays are all the raster kernel needs: where each tile's list begins and en
 themselves.
 
 !!! note "Profiling hook"
-    The course copy of this file wraps each stage in an opt-in timer
-    (`WARP_3DGS_PROFILE_TILES=1`). It is off by default and does not affect the algorithm; timing
-    GPU stages requires inserting synchronisation that would otherwise distort what it measures.
+The course copy of this file wraps each stage in an opt-in timer
+(`WARP_3DGS_PROFILE_TILES=1`). It is off by default and does not affect the algorithm; timing
+GPU stages requires inserting synchronisation that would otherwise distort what it measures.
 
 ---
 
@@ -277,10 +300,10 @@ worth being precise about what changes and what does not.
 
 ### The loop bound is the whole idea
 
-| | loop over | typical length |
-|---|---|---|
-| v2 | every splat in the scene | 100,000 |
-| v3 | only this pixel's tile list | tens |
+|     | loop over                   | typical length |
+| --- | --------------------------- | -------------- |
+| v2  | every splat in the scene    | 100,000        |
+| v3  | only this pixel's tile list | tens           |
 
 `tile_offsets` uses the compressed layout built in §2.5: tile `t` owns the records running from
 `tile_offsets[t]` up to, but not including, `tile_offsets[t + 1]`. That pair of numbers is your
@@ -319,8 +342,14 @@ because a pixel that saturates can abandon a short list rather than a long one.
         self.depths.assign(wp.array(projected.depths, dtype=wp.float32, device=self.device))
 
         offsets, packed_pairs, _ = self.builder.build(
-            self.centres, self.conics, self.supports, self.depths,
-            self.group_ids, self.splat_ids, count, self.tile_count,
+            self.centres,
+            self.conics,
+            self.supports,
+            self.depths,
+            self.group_ids,
+            self.splat_ids,
+            count,
+            self.tile_count,
         )
 ```
 
@@ -333,24 +362,24 @@ builder must re-sort per tile. And the builder runs between upload and raster.
         self.group_ids = wp.zeros(maximum_splats, dtype=wp.int32, ...)
 ```
 
-`splat_ids` is just `0, 1, 2, …` — the identity mapping, since the projected arrays are already
-indexed by position. `group_ids` is all zeros: one camera view, as noted in §2.3.
+`splat_ids` is just `0, 1, 2, …` — the identity mapping, since the projected arrays are already indexed by position.
+`group_ids` is all zeros: one camera view, as noted in §2.3.
 
 ---
 
 ## 5. The three versions side by side
 
-| | v1 | v2 | v3 |
-|---|---|---|---|
-| Pixel loop | Python, serial | Warp, parallel | Warp, parallel |
-| Splats per pixel | all M | all M | only this tile's list |
-| Ordering | one global depth sort | same, reused | per-tile, via stable two-pass sort |
-| Extra structures | none | device buffers | tile offsets + packed pairs |
-| Cost | $O(P \times M)$ serial | $O(P \times M)$ parallel | $O(P \times k)$ parallel, $k \ll M$ |
-| Output | reference | identical to v1 | identical to v1 |
+|                  | v1                     | v2                       | v3                                  |
+| ---------------- | ---------------------- | ------------------------ | ----------------------------------- |
+| Pixel loop       | Python, serial         | Warp, parallel           | Warp, parallel                      |
+| Splats per pixel | all M                  | all M                    | only this tile's list               |
+| Ordering         | one global depth sort  | same, reused             | per-tile, via stable two-pass sort  |
+| Extra structures | none                   | device buffers           | tile offsets + packed pairs         |
+| Cost             | $O(P \times M)$ serial | $O(P \times M)$ parallel | $O(P \times k)$ parallel, $k \ll M$ |
+| Output           | reference              | identical to v1          | identical to v1                     |
 
-The last row is the one to hold on to. Three quite different programs, one image. v2 changed *when*
-the work happens; v3 changed *how much* work there is. Neither changed *what is computed*, which is
+The last row is the one to hold on to. Three quite different programs, one image. v2 changed _when_
+the work happens; v3 changed _how much_ work there is. Neither changed _what is computed_, which is
 why the assignment can check all three against each other exactly.
 
 That is also the practical lesson: the correctness of a renderer lives in v1's maths, and every
