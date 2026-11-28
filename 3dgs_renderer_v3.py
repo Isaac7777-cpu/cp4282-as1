@@ -42,20 +42,20 @@ TRANSMITTANCE_CUTOFF = 1.0e-4
 
 @wp.kernel
 def rasterize_tiles(
-    centres: wp.array(dtype=wp.vec2),
-    conics: wp.array(dtype=wp.vec3),
-    colours: wp.array(dtype=wp.vec3),
-    opacities: wp.array(dtype=wp.float32),
-    supports: wp.array(dtype=wp.float32),
-    tile_offsets: wp.array(dtype=wp.int32),
-    packed_pairs: wp.array(dtype=wp.uint64),
+    centres: wp.array[wp.vec2],
+    conics: wp.array[wp.vec3],
+    colours: wp.array[wp.vec3],
+    opacities: wp.array[wp.float32],
+    supports: wp.array[wp.float32],
+    tile_offsets: wp.array[wp.int32],
+    packed_pairs: wp.array[wp.uint64],
     width: int,
     tile_size: int,
     tiles_x: int,
     background: wp.vec3,
-    image: wp.array(dtype=wp.vec3),
+    image: wp.array[wp.vec3],
 ):
-    pixel = wp.tid()
+    pixel = int(wp.tid())
     px_i = pixel % width
     py_i = pixel // width
 
@@ -65,13 +65,42 @@ def rasterize_tiles(
 
     px = float(px_i) + 0.5
     py = float(py_i) + 0.5
-    # TODO: Compute the RGB value at image[pixel].
+    # Compute the RGB value at image[pixel].
     # Composite only this pixel's tile list, `tile_offsets[tile] .. tile_offsets[tile + 1]`,
     # which the builder has already sorted near to far. Finish with the background
     # weighted by the remaining transmittance, matching 3dgs_renderer_v1.
 
-    # TODO: The RHS is a placeholder
-    image[pixel] = wp.vec3(0.0, 0.0, 0.0)
+    position = wp.vec2(px, py)
+    c = wp.vec3(0.0, 0.0, 0.0)
+    T = float(1.0)
+
+    # Now you only traverse the offsets range
+    for i in range(tile_offsets[tile], tile_offsets[tile + 1]):
+        splat = int(packed_pairs[i] & wp.uint64(0xFFFFFFFF))
+        delta = position - centres[splat]
+        du = delta[0]
+        dv = delta[1]
+        conic = conics[splat]
+        A = conic[0]
+        B = conic[1]
+        C = conic[2]
+        q = A * du**2.0 + 2.0 * B * du * dv + C * dv**2.0
+
+        if q > supports[splat]:
+            continue
+
+        alpha = min(opacities[splat] * wp.exp(-0.5 * q), 0.99)
+
+        if alpha <= (1 / 255):
+            continue
+
+        c = c + T * alpha * colours[splat]
+        T = T * (1.0 - alpha)
+
+        if T < 1e-4:
+            break
+
+    image[pixel] = c + T * background
 
 
 class GaussianFirstWarpRenderer:

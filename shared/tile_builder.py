@@ -35,7 +35,7 @@ def count_projected_tile_pairs(
     pair_counts: wp.array[wp.int32],
 ):
     """Find the tile rectangle touched by each projected Gaussian."""
-    splat: int = wp.tid()
+    splat = wp.tid()
     pair_counts[splat] = 0
     tile_bounds[splat] = wp.vec4i(0, -1, 0, -1)
 
